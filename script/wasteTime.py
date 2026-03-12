@@ -5,12 +5,12 @@ def jobids_under_10_minutes(df: pd.DataFrame) -> Dict[int, int]:
     """
     Input dataframe ressources demandées.
     
-    Retourne un dict {JobID: 1} pour les lignes où Elapsed < 600 s (inclut 0).
+    Retourne un dict {JobID: 1} pour les lignes où Elapsed < 600 s (on exclut 0).
     Ne modifie pas df et n'ajoute rien à la colonne 'codes'.
     Suppose que les colonnes 'JobID' et 'Elapsed' existent.
     """
     # Masque: Elapsed < 600 et valeurs non nulles
-    mask = df["Elapsed"].notna() & (df["Elapsed"] < 600) & df["JobID"].notna()
+    mask = df["Elapsed"].notna() & (df["Elapsed"] > 0) & (df["Elapsed"] < 600) & df["JobID"].notna()
 
     # Récupérer les JobID, les convertir en int (élimine aussi les NaN résiduels)
     jobids = df.loc[mask, "JobID"].astype(int)
@@ -112,6 +112,25 @@ def jobids_with_trailing_idle(
                 out[job] = 4
 
     return out
+
+def jobids_timelimit_over_elapsed(df: pd.DataFrame) -> Dict[int, int]:
+    """
+    Retourne un dict {JobID: 17} pour les lignes où :
+      - Elapsed > 0
+      - Timelimit (minutes) > Elapsed * 1.5 (converti en minutes)
+        c'est-à-dire que le timelimit dépasse elapsed + 50 % d'elapsed.
+
+    Colonnes attendues : 'JobID', 'Elapsed' (secondes), 'Timelimit' (minutes).
+    """
+    mask = (
+        df["Elapsed"].notna() &
+        (df["Elapsed"] > 0) &
+        df["Timelimit"].notna() &
+        df["JobID"].notna() &
+        (df["Timelimit"] > df["Elapsed"] / 60 * 1.5)
+    )
+    return {int(j): 17 for j in df.loc[mask, "JobID"].astype(int)}
+
 
 def get_a100_jobs_over_600s(df: pd.DataFrame) -> list[int]:
     """

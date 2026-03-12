@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+from prometheus_api_client import PrometheusConnect
+from prometheus_api_client.metric_range_df import MetricRangeDataFrame
 
 def export_gpu_memory_metrics(
     prom,
@@ -227,6 +229,8 @@ def adjust_columns_get_records(
     ).reset_index(drop=True)
     
     jobs_frame['code'] = ""
+    jobs_frame['90PercentileCPU'] = ""
+    jobs_frame['90PercentileGPU'] = ""
 
     return jobs_frame
 
@@ -334,5 +338,53 @@ def export_cpu_memory_metrics(
         cpu.merge(mem_narrow, on=['timestamp','slurmjobid'], how='outer')
            .set_index(['timestamp','slurmjobid'])
            .sort_index()
+           .convert_dtypes()   # NaN -> pd.NA via types nullables (Float64, Int64, etc.)
 )   
     return df_final
+
+
+def add_cpu_percentile_to_jobs(
+    df_cpu: pd.DataFrame,
+    df_jobs: pd.DataFrame,
+    *,
+    jobid_col: str = "JobID",
+) -> pd.DataFrame:
+    """
+    Calcule le 90e percentile de cpu_util par slurmjobid à partir du DataFrame
+    issu de export_cpu_memory_metrics, et l'ajoute dans df_jobs à la colonne
+    '90PercentileCPU' selon le JobID correspondant.
+
+    Paramètres
+    ----------
+    df_cpu : pd.DataFrame
+        Output de export_cpu_memory_metrics.
+        Doit avoir un MultiIndex (timestamp, slurmjobid) et une colonne 'cpu_util'.
+    df_jobs : pd.DataFrame
+        DataFrame cible (ex: jobs_frame). Doit contenir la colonne `jobid_col`.
+    jobid_col : str
+        Nom de la colonne JobID dans df_jobs (par défaut 'JobID').
+
+    Retour
+    ------
+    pd.DataFrame
+        df_jobs avec la colonne '90PercentileCPU' ajoutée ou mise à jour.
+    """
+    # Remettre slurmjobid en colonne si c'est dans l'index
+    if "slurmjobid" in df_cpu.index.names:
+        cpu = df_cpu.reset_index()
+    else:
+        cpu = df_cpu.copy()
+
+    # 90e percentile de cpu_util par slurmjobid
+    p90 = (
+        cpu.groupby("slurmjobid")["cpu_util"]
+        .quantile(0.90)
+    )
+    p90.index = pd.to_numeric(p90.index, errors="coerce")
+
+    df_jobs = df_jobs.copy()
+    df_jobs[jobid_col] = pd.to_numeric(df_jobs[jobid_col], errors="coerce").astype("Int64")
+
+    df_jobs["90PercentileCPU"] = df_jobs[jobid_col].map(p90)
+
+    return df_jobs
